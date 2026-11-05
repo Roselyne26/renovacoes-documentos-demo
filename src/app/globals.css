@@ -193,7 +193,7 @@ dialog time{display:block;margin-top:12px;font-size:.75rem;color:var(--faint)}
   .filters{grid-template-columns:1fr 1fr}
   .metrics article>strong{font-size:2.25rem}
 }
-@media(max-width:1020px){
+@media(max-width:1200px){
   .sidebar{display:none;box-shadow:8px 0 32px #0c3b2c40}
   .sidebar.is-open{display:flex}
   .sidebar-backdrop{display:block;position:fixed;inset:0;z-index:40;width:100%;height:100%;border:0;border-radius:0;background:#0c2a2066}
