@@ -12,10 +12,14 @@ const selectionKey = (candidate: Candidate) => candidate.selection_key || candid
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "Não foi possível concluir a ação.";
 const POLL_INTERVAL = DEMO_MODE ? 4000 : 30000;
 const PAGE_SIZE = 25;
+type View = 'overview'|'selection'|'results'|'corrections';
+const viewCopy: Record<View,[string,string]> = {overview:['Visão geral','Acompanhe as renovações e as pendências do mês.'],selection:['Renovar laudos','Escolha o mês, revise os estabelecimentos e inicie o lote.'],results:['Resultados','Acompanhe cada documento e exporte o relatório.'],corrections:['Correções','']};
 const statusClass = (value: string) => value.includes("avisos") ? "warning" : value === "Finalizado" ? "done" : value === "Erro" ? "error" : value === "Em andamento" ? "running" : "";
 
 export default function Renewals({correctionsEnabled=false,webLoginEnabled=false}:{correctionsEnabled?:boolean;webLoginEnabled?:boolean}) {
-  const [view, setView] = useState<'overview'|'selection'|'results'|'corrections'>('overview');
+  const [view, setView] = useState<View>('overview');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
   const [candidateQuery, setCandidateQuery] = useState('');
   const [candidatePage, setCandidatePage] = useState(1);
   const [resultPage, setResultPage] = useState(1);
@@ -172,12 +176,18 @@ export default function Renewals({correctionsEnabled=false,webLoginEnabled=false
   const retryWarningsCount=jobs.filter(j=>j.completed_at && j.message==='Finalizado (com avisos)').length;
   const retryWarningsButton=!DEMO_MODE && retryWarningsCount>0 && <div className="selection-footer"><p className="helper">Inclui os {retryWarningsCount} resultados com avisos da lista filtrada, em todas as páginas. Cada empresa será conferida no sistema de demonstração; etapas confirmadas não serão repetidas. O sistema de demonstração pode demorar para responder.</p><button className="primary" disabled={!!busy || !state?.execution_enabled || !!connectionError} onClick={()=>void retryWarnings()}>{retrying===-1?'Conferindo empresas…':`Tentar renovar todos com avisos (${retryWarningsCount})`}</button></div>;
 
-  return <>
-    <header><a className="brand" href="/" aria-label="Renovações — Demonstração início"><strong>Renovações — Demonstração</strong></a><span className="header-label">Saúde e segurança do trabalho</span><span className="local">Renovações</span></header>
-    <main>
-      <div className="heading"><div><p className="eyebrow">GESTÃO DE LAUDOS</p><h1>Renovações</h1><p>Consulte, selecione e acompanhe seus documentos.</p></div><span className={`connection-pill ${connectionError ? 'offline' : ''}`}><span aria-hidden="true" />{DEMO_MODE ? 'Demonstração' : connectionError ? 'Sem conexão' : state ? 'Conectado' : 'Conectando…'}</span></div>
-      <nav className="workspace-nav" aria-label="Áreas de renovações">{([['overview','Visão geral'],['selection','Renovar laudos'],['results','Resultados'],['corrections','Correções']] as const).filter(([key])=>key!=='corrections'||correctionsEnabled).map(([key,label])=><button key={key} aria-pressed={view===key} className={view===key?'active':''} onClick={()=>{setView(key);setFeedback("");}}>{label}{key==='results' && !!state?.jobs.length && <span>{state.jobs.length}</span>}</button>)}</nav>
-      
+  function navigate(next:View){setView(next);setFeedback("");setMenuOpen(false);window.scrollTo({top:0,behavior:'instant'});}
+  function closeMenu(){setMenuOpen(false);menuButton.current?.focus();}
+  const [viewTitle,viewDescription]=viewCopy[view];
+
+  return <div className="app-shell">
+    <a className="skip-content" href="#conteudo">Ir para o conteúdo</a>
+    <Sidebar view={view} resultCount={state?.jobs.length||0} open={menuOpen} onSelect={navigate} onClose={closeMenu}/>
+    <div className="app-main">
+    <header className="topbar"><div className="topbar-location"><button ref={menuButton} className="menu-button" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded={menuOpen} onClick={()=>setMenuOpen(v=>!v)}><Icon name="menu"/></button><span>Renovações</span><span aria-hidden="true">/</span><strong>{viewTitle}</strong></div><span className={`connection-pill ${connectionError ? 'offline' : ''}`}><span aria-hidden="true" />{connectionError ? 'Sem conexão' : 'Demonstração'}</span></header>
+    <main id="conteudo">
+      <div className="heading"><h1>{viewTitle}</h1><p>{viewDescription}</p></div>
+
       {connectionError && <div className="notice error-notice" role="alert">{connectionError} <button className="text-button" onClick={() => {void refresh();setDashboardRefresh(v=>v+1);}}>Tentar novamente</button></div>}
       {DEMO_MODE && <p className="notice">Dados fictícios. As ações são simuladas neste navegador.</p>}
       {!state && !connectionError && <LoadingNotice title="Carregando dados da plataforma…" description="Estamos reunindo os resultados e preparando a tela. Aguarde a conclusão do carregamento." />}
@@ -195,39 +205,40 @@ export default function Renewals({correctionsEnabled=false,webLoginEnabled=false
         <div className="document-metrics">{kinds.map(k => <Metric key={k} title={`${k.toUpperCase()} renovados`} value={dashboard?.documents[k]} />)}</div>
         <p className="helper dashboard-footnote">Os indicadores refletem os exemplos fictícios e as renovações simuladas nesta página.</p>
         <details className="overdue-list" onToggle={e=>setOverdueOpen(e.currentTarget.open)}><summary>Ver estabelecimentos atrasados <span>{dashboard?.overdue.length ?? '—'}</span></summary>{overdueOpen && <><ul>{dashboard?.overdue.slice((overduePage-1)*PAGE_SIZE,overduePage*PAGE_SIZE).map(j => <li key={j.id}><div><strong>{j.name}</strong><span>Código {j.code}</span></div><span className="due-date">{dateLabel(j.validity)}</span></li>)}{dashboard && !dashboard.overdue.length && <li>Nenhum atraso encontrado.</li>}</ul><Pagination page={overduePage} total={dashboard?.overdue.length || 0} onChange={setOverduePage} /></>}</details>
-        <div className="dashboard-next"><div><strong>Próxima renovação</strong><p>Escolha um mês e revise os estabelecimentos.</p></div><button className="primary" onClick={()=>setView('selection')}>Selecionar estabelecimentos →</button></div>
+        <div className="dashboard-next"><div><strong>Próxima renovação</strong><p>Escolha um mês e revise os estabelecimentos.</p></div><button className="primary" onClick={()=>navigate('selection')}>Selecionar estabelecimentos →</button></div>
       </section>}
 
       {view==='selection' && <section className="panel" aria-labelledby="selection-title">
-        <div className="section-title"><div><h2 id="selection-title">Renovar laudos</h2><p className="helper">1. Escolha o mês · 2. Revise a seleção · 3. Inicie</p></div></div>
-        <form id="find-month" onSubmit={e => { e.preventDefault(); void search(); }}><div><label htmlFor="renewal-month">Mês de renovação</label><input id="renewal-month" type="month" required value={renewalMonth} disabled={!!busy || !!batch?.active} onInput={e => { searchVersion.current++; setRenewalMonth(e.currentTarget.value); setSearchResult(null); setChosen(new Set()); }} /></div><button type="submit" className="primary" disabled={!!busy || !!batch?.active || !!connectionError}>{busy === "search" ? "Conferindo no sistema de demonstração…" : "Buscar no sistema de demonstração"}</button></form>
+        <div className="section-title"><div><h2 id="selection-title">Nova renovação</h2><ol className="steps" aria-label="Etapas"><li className={searchResult?"done":"current"}>Escolha o mês</li><li className={searchResult?(batch?.active?"done":"current"):""}>Revise a seleção</li><li className={batch?.active?"current":""}>Inicie</li></ol></div></div>
+        <form id="find-month" onSubmit={e => { e.preventDefault(); void search(); }}><div><label htmlFor="renewal-month">Mês de renovação</label><input id="renewal-month" type="month" required value={renewalMonth} disabled={!!busy || !!batch?.active} onInput={e => { searchVersion.current++; setRenewalMonth(e.currentTarget.value); setSearchResult(null); setChosen(new Set()); }} /></div><button type="submit" className="primary" disabled={!!busy || !!batch?.active || !!connectionError}>{busy === "search" ? "Buscando…" : "Buscar estabelecimentos"}</button></form>
         <p className="helper">Inclui pendências até o mês escolhido e atrasadas. Desmarque os estabelecimentos que não deseja renovar; cada documento mantém sua vigência.</p>
         {operationBusy === 'search' && <LoadingNotice title="Carregando dados do sistema de demonstração…" description="Estamos conferindo as vigências de LTCAT/PGR e PCMSO e reunindo as empresas do mês e as atrasadas. O sistema de demonstração pode demorar para responder. Aguarde; a lista será exibida quando a consulta terminar." simulated />}
         {searchResult && !DEMO_MODE && <p className="helper">PCMSOs cuja revisão já existe no sistema de demonstração foram retirados da seleção.</p>}
         {searchResult && <div className="selection-toolbar"><div className="candidate-search"><label htmlFor="candidate-search">Filtrar estabelecimentos</label><input id="candidate-search" type="search" value={candidateQuery} onInput={e=>setCandidateQuery(e.currentTarget.value)} placeholder="Nome ou código" /></div><div className="selection-tools"><strong>{chosen.size} de {searchResult.records.length} selecionados</strong><div><button className="text-button" disabled={!!busy || !!batch?.active} onClick={()=>setChosen(new Set(searchResult.records.map(selectionKey)))}>Selecionar todos</button><button className="text-button" disabled={!!busy || !!batch?.active || !chosen.size} onClick={()=>setChosen(new Set())}>Limpar seleção</button></div></div></div>}
         {searchResult && <div className="table-wrap"><table><thead><tr><th>Renovar</th><th>Estabelecimento</th><th>Código</th><th>Etapas necessárias</th></tr></thead><tbody id="candidates">{visibleCandidates.map(r => <tr key={selectionKey(r)}><td><input type="checkbox" aria-label={`Renovar ${r.name}`} checked={chosen.has(selectionKey(r))} onChange={() => toggle(r)} disabled={!!busy || !!batch?.active} /></td><td>{r.name}</td><td className="code">{r.code}</td><td>{r.ltcat_pgr_pending === undefined ? "Conferir LTCAT/PGR e PCMSO" : <>{r.ltcat_pgr_pending && <p>LTCAT/PGR · {dateLabel(r.ltcat_validity)}</p>}{r.pcmso_pending && <p>PCMSO · {dateLabel(r.pcmso_validity || null)}</p>}</>}</td></tr>)}</tbody></table></div>}
         {searchResult && <Pagination page={shownCandidatePage} total={candidates.length} onChange={setCandidatePage} />}
-        {!searchResult && <p className="helper">Escolha o mês e clique em Buscar no sistema de demonstração.</p>}
+        {!searchResult && <p className="helper">Escolha o mês e clique em Buscar estabelecimentos.</p>}
         {!DEMO_MODE && state?.capabilities?.execution === false && <p className="notice compact-notice">Consulta disponível. A integração está preparada; as renovações reais aguardam habilitação no servidor após o teste autorizado.</p>}
         <div className="selection-footer"><span>{chosen.size} estabelecimento(s) serão incluídos no lote.</span><button className="primary start-button" disabled={!searchResult || !chosen.size || !!busy || !!batch?.active || !state?.execution_enabled || !!connectionError} onClick={() => void start()}>{batch?.active ? "Renovações em andamento" : busy === "start" ? "Iniciando…" : DEMO_MODE ? "Simular renovações" : "Iniciar renovações"}</button></div>
       </section>}
 
       {view==='results' && <section className="panel report" aria-labelledby="report-title">
-        <div className="section-title"><div><h2 id="report-title">Resultados</h2><p className="helper">Consulte os resultados e exporte o relatório.</p></div><div className="report-actions"><span>{jobs.length} estabelecimento(s)</span><button className="secondary" disabled={!!busy || !state || !(state.jobs.some(completed)) || !!connectionError || state?.capabilities?.pdf === false} title={state?.capabilities?.pdf === false ? "Geração de PDF ainda não implementada no backend." : undefined} onClick={async () => { setBusy("pdf"); setFeedback(""); try { await downloadReport(reportMonth,status,deferredQuery); } catch (error) { setFeedback(errorMessage(error)); } finally { setBusy(null); } }}>{busy === "pdf" ? "Exportando…" : "Exportar PDF"}</button></div></div>
-        <div className="result-summary"><span className="done">{finishedCount} Finalizado</span><span className="warning">{warningCount} Finalizado (com avisos)</span>{errorCount>0 && <span className="error">{errorCount} Erro</span>}</div>
+        <div className="section-title"><div><h2 id="report-title">Renovações registradas</h2></div><div className="report-actions"><span>{jobs.length} estabelecimento(s)</span><button className="secondary" disabled={!!busy || !state || !(state.jobs.some(completed)) || !!connectionError || state?.capabilities?.pdf === false} title={state?.capabilities?.pdf === false ? "Geração de PDF ainda não implementada no backend." : undefined} onClick={async () => { setBusy("pdf"); setFeedback(""); try { await downloadReport(reportMonth,status,deferredQuery); } catch (error) { setFeedback(errorMessage(error)); } finally { setBusy(null); } }}>{busy === "pdf" ? "Exportando…" : "Exportar PDF"}</button></div></div>
+        <div className="result-summary"><span className="done">{finishedCount} Finalizado</span><span className="warning">{warningCount} Com aviso</span>{errorCount>0 && <span className="error">{errorCount} Erro</span>}</div>
         {!DEMO_MODE && batch?.active && batch.id && <button className="secondary" disabled={!!busy || !state?.execution_enabled} onClick={async()=>{setBusy('resume');try{await api('renewals/resume',{batch_id:batch.id});await refresh();setFeedback('Acompanhamento retomado. Etapas confirmadas não serão reenviadas.');}catch(error){setFeedback(errorMessage(error));}finally{setBusy(null);}}}>{busy==='resume'?'Retomando…':'Retomar acompanhamento'}</button>}
         <p className="helper batch-help">Dados fictícios da simulação. Recarregar a página restaura os exemplos. O PDF exportado não tem validade documental.</p>
         {(batch?.active || (!!batch?.total && batch?.message)) && <div className="batch-status" role="status" aria-live="polite">{batch.active ? `Processando ${batch.processed} de ${batch.total} empresa(s). ${batch.current_name ? `Agora: ${batch.current_name}.` : ""}` : `${batch.message} ${batch.completed} concluída(s), ${batch.attention} com avisos e ${batch.skipped} não executada(s).`}</div>}
         {!!state?.jobs.length && <div className="filters"><div><label htmlFor="search">Empresa ou código</label><input id="search" type="search" value={query} onInput={e => setQuery(e.currentTarget.value)} placeholder="Buscar no relatório" /></div><div><label htmlFor="month-filter">Mês de conclusão</label><input id="month-filter" type="month" value={reportMonth} onInput={e => setReportMonth(e.currentTarget.value)} /></div><div><label htmlFor="status-filter">Status dos documentos</label><select id="status-filter" value={status} onChange={e => setStatus(e.target.value)}><option value="">Todos os status</option>{["Pendente", "Em andamento", "Finalizado", "Finalizado (com avisos)", "Erro"].map(s => <option key={s}>{s}</option>)}</select></div><button className="text-button" onClick={() => { setQuery(""); setReportMonth(""); setStatus(""); }}>Limpar filtros</button></div>}
-        {!!jobs.length && <div className="table-wrap"><table><thead><tr><th>Estabelecimento</th><th>Código</th><th>Vigência</th><th>LTCAT</th><th>PGR</th><th>PCMSO</th><th>Ações</th></tr></thead><tbody>{visibleJobs.map(j => <tr key={j.id}><td><strong>{j.name}</strong><p>{j.message}</p>{kinds.some(k => j[k] === "Em andamento") && <div className="progress"><span /></div>}</td><td className="code">{j.code}</td><td>{dateLabel(j.validity)}</td>{kinds.map(k => <td key={k}><span className={`badge ${statusClass(j[k])}`}>{j[k]}</span></td>)}<td><button className="secondary" onClick={() => void showDetails(j)}>Detalhes</button></td></tr>)}</tbody></table></div>}
+        {!!jobs.length && <div className="table-wrap"><table><thead><tr><th>Estabelecimento</th><th>Código</th><th>Vigência</th><th className="status-col">LTCAT</th><th className="status-col">PGR</th><th className="status-col">PCMSO</th><th>Ações</th></tr></thead><tbody>{visibleJobs.map(j => <tr key={j.id}><td><strong>{j.name}</strong><p>{j.message}</p>{kinds.some(k => j[k] === "Em andamento") && <div className="progress"><span /></div>}</td><td className="code">{j.code}</td><td>{dateLabel(j.validity)}</td>{kinds.map(k => <td key={k} className="status-col"><span className={`badge ${statusClass(j[k])}`} title={j[k]}>{j[k]==="Finalizado (com avisos)"?"Com aviso":j[k]}</span></td>)}<td><button className="secondary" onClick={() => void showDetails(j)}>Detalhes</button></td></tr>)}</tbody></table></div>}
         <Pagination page={shownResultPage} total={jobs.length} onChange={setResultPage} />
         {retryWarningsButton}
         {bulkRetry && <div className="notice" role="status"><p>{bulkRetry.processed} de {bulkRetry.total} empresas conferidas · {bulkRetry.accepted} tentativas preparadas · {bulkRetry.blocked.length} para conferência.</p>{!!bulkRetry.blocked.length && <details><summary>Ver empresas que continuam bloqueadas</summary>{bulkRetry.blocked.map((message,i)=><p key={i}>{message}</p>)}</details>}</div>}
-        {state && !jobs.length && <div className="empty"><strong>{state.jobs.length ? 'Nenhum resultado para estes filtros' : 'Nenhuma renovação registrada'}</strong><p>{state.jobs.length ? 'Altere os filtros para consultar outros resultados.' : 'Os resultados aparecerão aqui após o processamento dos laudos.'}</p>{!state.jobs.length && <button className="secondary" onClick={()=>setView('selection')}>Selecionar estabelecimentos</button>}</div>}
+        {state && !jobs.length && <div className="empty"><strong>{state.jobs.length ? 'Nenhum resultado para estes filtros' : 'Nenhuma renovação registrada'}</strong><p>{state.jobs.length ? 'Altere os filtros para consultar outros resultados.' : 'Os resultados aparecerão aqui após o processamento dos laudos.'}</p>{!state.jobs.length && <button className="secondary" onClick={()=>navigate('selection')}>Selecionar estabelecimentos</button>}</div>}
       </section>}
       
       <footer>Demonstração de portfólio com dados fictícios.</footer>
     </main>
+    </div>
 
     <dialog ref={dialog} onCancel={closeDetails} aria-labelledby="detail-title">
       <div className="dialog-heading"><h2 id="detail-title">{details?.job.name || "Detalhes da renovação"}</h2><button className="secondary" onClick={closeDetails}>Fechar</button></div>
@@ -243,11 +254,11 @@ export default function Renewals({correctionsEnabled=false,webLoginEnabled=false
         {retryWarningsButton}
       </>}
     </dialog>
-  </>;
+  </div>;
 }
 
 function Metric({ title, value, description }: { title: string; value?: number | null; description?: string }) {
-  return <article><span>{title}</span><strong>{value ?? "—"}</strong>{description && <p className="helper">{description}</p>}</article>;
+  return <article><span>{title}</span><strong className={value === 0 ? "zero" : undefined}>{value ?? "—"}</strong>{description && <p className="helper">{description}</p>}</article>;
 }
 
 function LoadingNotice({title,description,simulated=false}:{title:string;description:string;simulated?:boolean}) {
@@ -260,4 +271,23 @@ function Pagination({page,total,onChange}:{page:number;total:number;onChange:(pa
   const pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
   if(!total) return null;
   return <div className="pagination"><span>{(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE,total)} de {total}</span>{pages>1 && <div><button className="secondary" aria-label="Página anterior" disabled={page<=1} onClick={()=>onChange(page-1)}>← Anterior</button><span>Página {page} de {pages}</span><button className="secondary" aria-label="Próxima página" disabled={page>=pages} onClick={()=>onChange(page+1)}>Próxima →</button></div>}</div>;
+}
+
+const navItems: {key:View;label:string;icon:IconName}[] = [{key:'overview',label:'Visão geral',icon:'home'},{key:'selection',label:'Renovar laudos',icon:'file'},{key:'results',label:'Resultados',icon:'check'}];
+
+function Sidebar({view,resultCount,open,onSelect,onClose}:{view:View;resultCount:number;open:boolean;onSelect:(view:View)=>void;onClose:()=>void}) {
+  return <>
+    {open && <button className="sidebar-backdrop" aria-label="Fechar navegação" onClick={onClose}/>}
+    <aside id="sidebar" className={`sidebar${open?' is-open':''}`} onKeyDown={e=>{if(e.key==='Escape')onClose();}}>
+      <div className="sidebar-head"><a className="sidebar-brand" href="/" aria-label="Renovações — início"><span className="sidebar-mark"><Icon name="shield"/></span><span><strong>Renovações</strong><small>Gestão de laudos</small></span></a><button className="sidebar-close" aria-label="Fechar menu" onClick={onClose}><Icon name="close"/></button></div>
+      <nav aria-label="Navegação principal">{navItems.map(item=><button key={item.key} className={view===item.key?'active':''} aria-current={view===item.key?'page':undefined} onClick={()=>onSelect(item.key)}><Icon name={item.icon}/><span>{item.label}</span>{item.key==='results' && !!resultCount && <span className="nav-count">{resultCount}</span>}</button>)}</nav>
+      <div className="sidebar-note"><strong>Modo demonstração</strong><p>Dados fictícios. As ações são simuladas neste navegador.</p></div>
+    </aside>
+  </>;
+}
+
+type IconName = 'home'|'file'|'check'|'shield'|'menu'|'close';
+function Icon({name}:{name:IconName}) {
+  const paths={home:<><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,file:<><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></>,check:<><rect x="5" y="4" width="14" height="17" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/><path d="m8 13 3 3 5-6"/></>,shield:<><path d="M12 3 5 6v5.5c0 4.4 3 7.9 7 9.5 4-1.6 7-5.1 7-9.5V6Z"/><path d="m9 12 2 2 4-4.5"/></>,menu:<path d="M4 6h16M4 12h16M4 18h16"/>,close:<path d="m6 6 12 12M18 6 6 18"/>};
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
